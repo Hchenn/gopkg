@@ -29,6 +29,8 @@ type Pool interface {
 	Go(f func())
 	// CtxGo executes f and accepts the context.
 	CtxGo(ctx context.Context, f func())
+	// BenchGos
+	BenchGos(ctx context.Context, f ...func())
 	// SetPanicHandler sets the panic handler.
 	SetPanicHandler(f func(context.Context, interface{}))
 }
@@ -108,6 +110,46 @@ func (p *pool) SetCap(cap int32) {
 
 func (p *pool) Go(f func()) {
 	p.CtxGo(context.Background(), f)
+}
+
+func (p *pool) BenchGos(ctx context.Context, f ...func()) {
+	l := len(f)
+	if l == 1 {
+		p.CtxGo(ctx, f[0])
+		return
+	}
+	var head, tail *task
+	for i := 0; i < l; i++ {
+		t := taskPool.Get().(*task)
+		t.ctx = ctx
+		t.f = f[i]
+		if i == 0 {
+			head, tail = t, t
+		} else {
+			tail.next = t
+			tail = tail.next
+		}
+	}
+	p.taskLock.Lock()
+	if p.taskHead == nil {
+		p.taskHead = head
+		p.taskTail = tail
+	} else {
+		p.taskTail.next = head
+		p.taskTail = tail
+	}
+	p.taskLock.Unlock()
+	atomic.AddInt32(&p.taskCount, int32(l))
+	// The following two conditions are met:
+	// 1. the number of tasks is greater than the threshold.
+	// 2. The current number of workers is less than the upper limit p.cap.
+	// or there are currently no workers.
+	for (atomic.LoadInt32(&p.taskCount) >= p.config.ScaleThreshold && p.WorkerCount() < atomic.LoadInt32(&p.cap)) || p.WorkerCount() == 0 {
+		p.incWorkerCount()
+		w := workerPool.Get().(*worker)
+		w.pool = p
+		w.run()
+	}
 }
 
 func (p *pool) CtxGo(ctx context.Context, f func()) {

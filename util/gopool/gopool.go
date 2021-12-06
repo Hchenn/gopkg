@@ -42,6 +42,11 @@ func CtxGo(ctx context.Context, f func()) {
 	defaultPool.CtxGo(ctx, f)
 }
 
+// BenchGos is preferred than Go.
+func BenchGos(ctx context.Context, f ...func()) {
+	defaultPool.BenchGos(ctx, f...)
+}
+
 // SetCap is not recommended to be called, this func changes the global pool's capacity which will affect other callers.
 func SetCap(cap int32) {
 	defaultPool.SetCap(cap)
